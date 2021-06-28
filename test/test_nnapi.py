@@ -293,6 +293,17 @@ class TestNNAPI(TestCase):
             convert_args=[torch.zeros(1, 2, 0, 0)],
         )
 
+    def test_detach(self):
+        class DetachModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = x.detach()
+                return torch.nn.functional.relu(y)
+
+        self.check(DetachModule(), torch.randn(1, 2, 3, 3))
+
     def test_mean(self):
         class MeanModule(torch.nn.Module):
             def __init__(self, dim, keep=False):
