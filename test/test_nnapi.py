@@ -49,6 +49,7 @@ class TestNNAPI(TestCase):
                 args = arg_or_args
             module.eval()
             traced = torch.jit.trace(module, trace_args or args)
+            breakpoint()
             nnapi_module = convert_model_to_nnapi(traced, convert_args or args)
             if not self.can_run_nnapi:
                 # Only test that the model was converted successfully.
@@ -316,6 +317,14 @@ class TestNNAPI(TestCase):
             arg,
             convert_args=[torch.zeros(1, 2, 0, 0)],
         )
+
+    def test_zeros(self):
+        class Zeros(torch.nn.Module):
+            def forward(self, size):
+                return torch.zeros(*size)
+
+        # self.check(Zeros(), torch.randint(5, size=(2,)))
+        self.check(Zeros(), torch.tensor([2, 3], dtype=torch.int))
 
     def test_detach(self):
         class DetachModule(torch.nn.Module):
