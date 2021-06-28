@@ -1529,15 +1529,33 @@ bool areEqual(const Expr* expr1, const Expr* expr2) {
   return diff->isConstant() && (immediateAs<int>(diff) == 0);
 };
 
-bool areEqual(
+bool doesExprContainAnyVar(
+    const Expr* expr,
+    const std::unordered_set<const Var*>& vars) {
+  for (auto* v : VarFinder::find(expr)) {
+    if (vars.count(v)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Returns true if the given list of indices are equivalent.
+bool areIndicesEquivalent(
     const std::vector<const Expr*>& expr_list1,
-    const std::vector<const Expr*>& expr_list2) {
+    const std::vector<const Expr*>& expr_list2,
+    const std::unordered_set<const Var*>& outer_loop_vars) {
   if (expr_list1.size() != expr_list2.size()) {
     return false;
   }
   for (size_t i = 0; i < expr_list1.size(); ++i) {
-    if (!areEqual(expr_list1[i], expr_list2[i])) {
-      return false;
+    auto expr1 = expr_list1[i];
+    auto expr2 = expr_list2[i];
+    if (doesExprContainAnyVar(expr1, outer_loop_vars) ||
+        doesExprContainAnyVar(expr2, outer_loop_vars)) {
+      if (!areEqual(expr1, expr2)) {
+        return false;
+      }
     }
   }
   return true;
@@ -1546,17 +1564,39 @@ bool areEqual(
 bool LoopNest::hasLoopCarriedDependence(For* loop) {
   analysis::MemDependencyChecker analyzer;
   loop->accept(&analyzer);
+
+  std::unordered_set<const Var*> outer_loop_vars = {loop->var()};
+  auto outer_loops = LoopNest::getEnclosingLoopNest(loop);
+  for (auto l : outer_loops) {
+    outer_loop_vars.insert(l->var());
+  }
+
   // High-level algorithm to check if two accesses to a buffer, A and B, one of
   // which is a Store, result in a loop-carried dependence:
-  //   1. If the index expressions are equal in A and B, then that is a
+  //   1. If the index expressions are equivalent in A and B, then that is a
   //      loop-independent dependence.
-  //   2. If the index expressions are not equal in A and B:
+  //   2. If the index expressions are not equivalent in A and B:
   //       a) if the bounds on the accesses overlap, then this is a
   //          loop-carried dependence.
   //       b) if the bounds on the accesses do not overlap, then there is no
   //          dependence.
   //
+  // Checking if the index expressions in A and B are equivalent:
+  //   * For every pair of indices I1 and I2 at the same position A and B:
+  //       * If I1 and I2 do not contain any of the outer loop variables, they
+  //         considered equivalent.
+  //       * If I1 or I2 contain any of the outer loop variables, then they must
+  //         be equal.
+  //   * If any pair of indices at the same position in A and B are not
+  //     equivalent, then the index expressions in A and B are not equivalent.
+  //   * NOTE: Since we check for equality of index expressions whenever outer
+  //     loop variables are involved, this may report some cases as *not*
+  //     equivalent even though they are actually equivalent. It is impractical
+  //     to handle all possible cases here, so, we are being conservative and
+  //     report some such cases as having a loop-carried dependence.
+  //
   // Implementation:
+  //
   // For every pair of statements, S1 and S2, in the loop:
   //  * Get the loads and stores in S1 and S2.
   //  * For every store in S1 and load in S2 to the same buffer, if the index
@@ -1578,7 +1618,8 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
       for (auto& aStore : aStores) {
         for (auto& bLoad : bLoads) {
           if (aStore->buf() == bLoad->buf()) {
-            if (!areEqual(aStore->indices(), bLoad->indices())) {
+            if (!areIndicesEquivalent(
+                    aStore->indices(), bLoad->indices(), outer_loop_vars)) {
               if (isOverlapping(analyzer, aStore, bLoad)) {
                 return true;
               }
@@ -1590,7 +1631,8 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
       for (auto& bStore : bStores) {
         for (auto& aLoad : aLoads) {
           if (bStore->buf() == aLoad->buf()) {
-            if (!areEqual(bStore->indices(), aLoad->indices())) {
+            if (!areIndicesEquivalent(
+                    bStore->indices(), aLoad->indices(), outer_loop_vars)) {
               if (isOverlapping(analyzer, bStore, aLoad)) {
                 return true;
               }
@@ -1602,7 +1644,8 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
       for (auto& aStore : aStores) {
         for (auto& bStore : bStores) {
           if (aStore->buf() == bStore->buf()) {
-            if (!areEqual(aStore->indices(), bStore->indices())) {
+            if (!areIndicesEquivalent(
+                    aStore->indices(), bStore->indices(), outer_loop_vars)) {
               if (isOverlapping(analyzer, aStore, bStore)) {
                 return true;
               }
