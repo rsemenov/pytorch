@@ -166,6 +166,30 @@ class TestNNAPI(TestCase):
                  mod, torch.randn(4, 2, 1, 3, 7),
                  convert_args=[torch.zeros(4, 2, 0, 0, 7)])
 
+    def test_slice(self):
+        class SliceModule(torch.nn.Module):
+            def __init__(self, start, stop, step):
+                super().__init__()
+                self.start = start
+                self.stop = stop
+                self.step = step
+
+            def forward(self, t):
+                return t[1:, self.start:self.stop:self.step, :]
+
+        class SliceModule2(torch.nn.Module):
+            def forward(self, t):
+                return t[3:]
+
+        self.check(
+            SliceModule(1, 5, 2),
+            torch.randn(4, 6, 2)
+        )
+        self.check(
+            SliceModule2(),
+            torch.randn(5)
+        )
+
     def test_cat(self):
         class CatModule(torch.nn.Module):
             def __init__(self, dim):
